@@ -33,6 +33,12 @@ Example using JS with ethers v6:
 macroFwd.runMacro(sbMacroAddr, ethers.AbiCoder.defaultAbiCoder().encode(['address', 'int96', 'address', 'address', 'uint256'], [torexAddr, flowRate, distributor, referrer, upgradeAmount]));
 ```
 
+Instead of using a client-side library to get encoded parameters, you can also use the convenience function `getParams()`.
+For example in a JS App:
+```
+macroFwd.runMacro(sbMacroAddr, await sbMacro.getParams(torexAddr, flowRate, distributor, referrer, upgradeAmount));
+```
+
 For more details about the arguments, see the contract documentation.
 
 ### Limitations

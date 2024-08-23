@@ -57,6 +57,22 @@ contract SBMacroTest is Test {
         // TODO: verify distributor, referrer
     }
 
+    function testWithoutUpgradeUsingConvenienceFunction() external {
+        SBMacro m = new SBMacro();
+
+        vm.startPrank(alice);
+        address underlyingToken = inToken.getUnderlyingToken();
+        IERC20(underlyingToken).approve(address(inToken), type(uint256).max);
+        inToken.upgrade(1000 ether);
+
+        macroFwd.runMacro(m, m.getParams(address(torex), DEFAULT_FLOWRATE, DEFAULT_DISTRIBUTOR, DEFAULT_REFERRER, 0));
+        vm.stopPrank();
+
+        ISuperfluidPool outTokenDistributionPool = torex.outTokenDistributionPool();
+        assertGt(outTokenDistributionPool.getUnits(alice), 0, "no outTokenDistributionPool units assigned");
+        // TODO: verify distributor, referrer
+    }
+
     function testWithExactUpgradeAmount() public {
         SBMacro m = new SBMacro();
 

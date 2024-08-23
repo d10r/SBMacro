@@ -11,22 +11,25 @@ import { ITorex } from "./interfaces/ITorex.sol";
  * User defined macro for SuperBoring.
  * How to use this contract:
  * - Deploy to a network with Superfluid and the MacroForwarder available
- * - Make a call to the MacroForwarder contract:
- * ```
- * macroFwd.runMacro(sbMacroAddr, abi.encode(torexAddr, flowRate, distributor, referrer, upgradeAmount));
- * ```
- *
- * Macro Arguments:
- * - `torexAddr`: address of the Torex contract. The token address is derived from this (inToken).
- * - `flowRate`: flowrate to be set for the flow to the Torex contract. The pre-existing flowrate must be 0 (no flow).
- * - `distributor`: address of the distributor, or zero address if none.
- * - `referrer`: address of the referrer, or zero address if none.
- * - `upgradeAmount`: amount (18 decimals) to upgrade from underlying to SuperToken.
- *   - if 0, no upgrade is performed.
- *   - if `type(uint256).max`, the maximum possible amount is upgraded (current allowance).
- *   - otherwise, the specified amount is upgraded. Requires sufficient underlying balance and allowance, otherwise the transaction will revert.
+ * - Make a call to `MacroForwarder.runMacro()`, providing the address of this contract and the encoded parameters.
  */
 contract SBMacro is IUserDefinedMacro {
+
+    /**
+     * @dev Convenience function to get abi encoded parameters to be used with `runMacro()`.
+     * @param torexAddr address of the Torex contract. The token address is derived from this (inToken).
+     * @param flowRate flowrate to be set for the flow to the Torex contract. The pre-existing flowrate must be 0 (no flow).
+     * @param distributor address of the distributor, or zero address if none.
+     * @param referrer address of the referrer, or zero address if none.
+     * @param upgradeAmount amount (18 decimals) to upgrade from underlying to SuperToken.
+     *   - if `type(uint256).max`, the maximum possible amount is upgraded (current allowance).
+     *   - otherwise, the specified amount is upgraded. Requires sufficient underlying balance and allowance, otherwise the transaction will revert.
+     */
+    function getParams(address torexAddr, int96 flowRate, address distributor, address referrer, uint256 upgradeAmount)
+        public pure returns (bytes memory)
+    {
+        return abi.encode(torexAddr, flowRate, distributor, referrer, upgradeAmount);
+    }
 
     /// @dev Invoked by the MacroForwarder contract, with relayed transaction sender
     function buildBatchOperations(ISuperfluid host, bytes memory params, address msgSender)
