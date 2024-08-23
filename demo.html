@@ -77,6 +77,10 @@
             border-radius: 4px;
             box-shadow: inset 0 0 5px #00ff00;
         }
+        .disabled {
+            opacity: 0.5;
+            pointer-events: none;
+        }
     </style>
 </head>
 <body>
@@ -87,42 +91,46 @@
             <span id="networkIdLabel">Network ID: Not connected</span><br>
             <span id="walletAddressLabel">Wallet Address: Not connected</span>
         </div>
-        <form onsubmit="return false;" class="tech-border">
-            <div class="form-group">
-                <label for="torexAddress">Torex Address:</label>
-                <input type="text" id="torexAddress" name="torexAddress" value="0x269F9EF6868F70fB20DDF7CfDf69Fe1DBFD307dE" oninput="handleTorexAddressChange()" onblur="handleTorexAddressChange()">
-            </div>
-            <div class="form-group">
-                <label for="flowrate">Flowrate (tokens per day):</label>
-                <input type="number" id="flowrate" name="flowrate" value="10">
-            </div>
-            <div class="form-group">
-                <label for="distributor">Distributor (optional):</label>
-                <input type="text" id="distributor" name="distributor" value="0x0000000000000000000000000000000000000000">
-            </div>
-            <div class="form-group">
-                <label for="referrer">Referrer (optional):</label>
-                <input type="text" id="referrer" name="referrer" value="0x0000000000000000000000000000000000000000">
-            </div>
-            <div class="form-group">
-                <label for="upgradeAmount">Upgrade Amount (optional):</label>
-                <input type="number" id="upgradeAmount" name="upgradeAmount" value="0">
-            </div>
-            <button type="button" onclick="startDCAing()">Start DCAing</button>
-        </form>
-
-        <div id="approvalForm" style="display: none;" class="tech-border">
-            <h2>ERC20 Approval</h2>
+        
+        <div id="approvalForm" class="tech-border disabled">
+            <h2>ERC20 Approval for Upgrade to SuperToken</h2>
             <p id="tokenBalance"></p>
             <p id="currentAllowance"></p>
             <form onsubmit="return false;">
                 <div class="form-group">
-                    <label for="allowanceAmount">Allowance Amount:</label>
-                    <input type="number" id="allowanceAmount" name="allowanceAmount" value="100">
+                    <label for="allowanceAmount">New Allowance Amount:</label>
+                    <input type="number" id="allowanceAmount" name="allowanceAmount" value="100" disabled>
                 </div>
-                <button type="button" onclick="approveToken()">Approve Token</button>
+                <button type="button" onclick="approveToken()" disabled>Approve Token</button>
             </form>
         </div>
+
+        <form onsubmit="return false;" class="tech-border disabled">
+            <h2>Start DCA (flow to Torex)</h2>
+            <p>Torex addresses can be found at <a href="https://github.com/superfluid-finance/averageX/wiki/Base-Prod-Deployment" target="_blank">Base Prod Deployment</a>.</p>
+            <div class="form-group">
+                <label for="torexAddress">Torex Address:</label>
+                <input type="text" id="torexAddress" name="torexAddress" placeholder="Enter Torex address" oninput="handleTorexAddressChange()" onblur="handleTorexAddressChange()" disabled>
+            </div>
+            <div class="form-group">
+                <label for="flowrate">Flowrate (tokens per day):</label>
+                <input type="number" id="flowrate" name="flowrate" value="10" disabled>
+            </div>
+            <div class="form-group">
+                <label for="distributor">Distributor (optional):</label>
+                <input type="text" id="distributor" name="distributor" value="0x0000000000000000000000000000000000000000" disabled>
+            </div>
+            <div class="form-group">
+                <label for="referrer">Referrer (optional):</label>
+                <input type="text" id="referrer" name="referrer" value="0x0000000000000000000000000000000000000000" disabled>
+            </div>
+            <div class="form-group">
+                <label for="upgradeAmount">Upgrade Amount (optional):</label>
+                <input type="text" id="upgradeAmount" name="upgradeAmount" value="0" disabled>
+                <button type="button" onclick="setMaxUpgradeAmount()" disabled>Max</button>
+            </div>
+            <button type="button" onclick="startDCAing(event)" disabled>Start DCAing</button>
+        </form>
     </div>
 
     <script>
@@ -136,6 +144,9 @@
         let torexContract;
         let superTokenContract;
         let underlyingTokenContract;
+        let underlyingTokenDecimals;
+        let underlyingBalance;
+        let underlyingAllowance;
 
         async function connectWallet() {
             if (typeof window.ethereum !== 'undefined') {
@@ -149,9 +160,21 @@
                     alert('Currently works with base-mainnet only, but connected to different chain!');
                 }
                 document.getElementById('walletAddressLabel').innerHTML = `Wallet Address: ${walletAddress}`;
+                enableForms();
             } else {
                 alert('Please install MetaMask or another Ethereum wallet');
             }
+        }
+
+        function enableForms() {
+            document.querySelector('form.tech-border').classList.remove('disabled');
+            document.querySelectorAll('form.tech-border input, form.tech-border button').forEach(el => el.disabled = false);
+        }
+
+        function resetApprovalForm() {
+            document.getElementById('tokenBalance').innerHTML = '';
+            document.getElementById('currentAllowance').innerHTML = '';
+            document.getElementById('allowanceAmount').value = '100';
         }
 
         async function handleTorexAddressChange() {
@@ -161,6 +184,13 @@
             }
 
             const torexAddress = document.getElementById('torexAddress').value;
+            if (!torexAddress) {
+                document.getElementById('approvalForm').classList.add('disabled');
+                document.querySelectorAll('#approvalForm input, #approvalForm button').forEach(el => el.disabled = true);
+                resetApprovalForm();
+                return;
+            }
+
             const torexAbi = ['function getPairedTokens() view returns (address, address)'];
             torexContract = new ethers.Contract(torexAddress, torexAbi, signer);
 
@@ -177,7 +207,11 @@
                 const underlyingTokenAddress = await superTokenContract.getUnderlyingToken();
                 console.log('Super Token Address:', superTokenAddress);
                 console.log('Underlying Token Address:', underlyingTokenAddress);
-                if (underlyingTokenAddress !== "0x0000000000000000000000000000000000000000") {
+                if (underlyingTokenAddress === "0x0000000000000000000000000000000000000000") {
+                    document.getElementById('approvalForm').classList.add('disabled');
+                    document.querySelectorAll('#approvalForm input, #approvalForm button').forEach(el => el.disabled = true);
+                    resetApprovalForm();
+                } else {
                     const underlyingTokenAbi = [
                         'function balanceOf(address account) view returns (uint256)',
                         'function allowance(address owner, address spender) view returns (uint256)',
@@ -189,26 +223,33 @@
 
                     const superTokenSymbol = await superTokenContract.symbol();
                     const underlyingTokenSymbol = await underlyingTokenContract.symbol();
-                    const underlyingTokenDecimals = await underlyingTokenContract.decimals();
+                    underlyingTokenDecimals = await underlyingTokenContract.decimals();
 
                     console.log('Super Token Symbol:', superTokenSymbol);
                     console.log('Underlying Token Symbol:', underlyingTokenSymbol);
 
-                    const underlyingBalance = await underlyingTokenContract.balanceOf(walletAddress);
-                    const underlyingAllowance = await underlyingTokenContract.allowance(walletAddress, superTokenAddress);
+                    underlyingBalance = await underlyingTokenContract.balanceOf(walletAddress);
+                    underlyingAllowance = await underlyingTokenContract.allowance(walletAddress, superTokenAddress);
 
                     const formattedBalance = ethers.formatUnits(underlyingBalance, underlyingTokenDecimals);
                     const formattedAllowance = ethers.formatUnits(underlyingAllowance, underlyingTokenDecimals);
 
                     document.getElementById('tokenBalance').innerHTML = `Token Balance: ${formattedBalance} ${underlyingTokenSymbol}`;
                     document.getElementById('currentAllowance').innerHTML = `Current Allowance: ${formattedAllowance} ${underlyingTokenSymbol}`;
-                    document.getElementById('approvalForm').style.display = 'block';
-                } else {
-                    document.getElementById('approvalForm').style.display = 'none';
+                    
+                    // Update the approval form
+                    document.getElementById('allowanceAmount').value = formattedAllowance;
+
+                    // Enable the approval form
+                    document.getElementById('approvalForm').classList.remove('disabled');
+                    document.querySelectorAll('#approvalForm input, #approvalForm button').forEach(el => el.disabled = false);
                 }
             } catch (error) {
                 console.error('Error instantiating contracts:', error);
                 alert('Error instantiating contracts. Please check the Torex address.');
+                document.getElementById('approvalForm').classList.add('disabled');
+                document.querySelectorAll('#approvalForm input, #approvalForm button').forEach(el => el.disabled = true);
+                resetApprovalForm();
             }
         }
 
@@ -220,7 +261,6 @@
 
             const allowanceAmount = document.getElementById('allowanceAmount').value;
             const superTokenAddress = await superTokenContract.getAddress();
-            const underlyingTokenDecimals = await underlyingTokenContract.decimals();
             const amount = ethers.parseUnits(allowanceAmount, underlyingTokenDecimals);
 
             try {
@@ -233,7 +273,13 @@
                 alert('Error approving token. Please try again.');
             }
         }
-        async function startDCAing() {
+
+        function setMaxUpgradeAmount() {
+            document.getElementById('upgradeAmount').value = 'max';
+        }
+
+        async function startDCAing(event) {
+            if (event) event.preventDefault();
             console.log("dcaing");
             if (!provider || !signer) {
                 alert('Please connect your wallet first');
@@ -242,10 +288,14 @@
 
             // Get input values
             const torexAddress = document.getElementById('torexAddress').value;
+            if (!torexAddress) {
+                alert('Please enter a Torex address');
+                return;
+            }
             const flowratePerDay = document.getElementById('flowrate').value;
             const distributor = document.getElementById('distributor').value || "0x0000000000000000000000000000000000000000";
             const referrer = document.getElementById('referrer').value || "0x0000000000000000000000000000000000000000";
-            const upgradeAmount = document.getElementById('upgradeAmount').value || "0";
+            let upgradeAmount = document.getElementById('upgradeAmount').value;
 
             // Convert flowrate from tokens per day to wei per second
             const tokensPerSecond = flowratePerDay / (24 * 60 * 60);
@@ -253,6 +303,21 @@
             const flowrate = weiPerSecond.toString();
 
             console.log(`flowrate: ${flowrate}`);
+
+            // Handle upgrade amount
+            if (upgradeAmount === 'max') {
+                upgradeAmount = ethers.MaxUint256.toString();
+            } else {
+                upgradeAmount = ethers.parseUnits(upgradeAmount, underlyingTokenDecimals).toString();
+                if (ethers.getBigInt(upgradeAmount) > ethers.getBigInt(underlyingBalance)) {
+                    alert('Upgrade amount exceeds your balance. Please enter a lower amount.');
+                    return;
+                }
+                if (ethers.getBigInt(upgradeAmount) > ethers.getBigInt(underlyingAllowance)) {
+                    alert('Upgrade amount exceeds your allowance. Please approve a higher amount first.');
+                    return;
+                }
+            }
 
             // Get ABI (you should replace this with your actual ABI)
             const sbMacroAbi = '[{"type":"function","name":"buildBatchOperations","inputs":[{"name":"host","type":"address","internalType":"contract ISuperfluid"},{"name":"params","type":"bytes","internalType":"bytes"},{"name":"msgSender","type":"address","internalType":"address"}],"outputs":[{"name":"operations","type":"tuple[]","internalType":"struct ISuperfluid.Operation[]","components":[{"name":"operationType","type":"uint32","internalType":"uint32"},{"name":"target","type":"address","internalType":"address"},{"name":"data","type":"bytes","internalType":"bytes"}]}],"stateMutability":"view"},{"type":"function","name":"getParams","inputs":[{"name":"torexAddr","type":"address","internalType":"address"},{"name":"flowRate","type":"int96","internalType":"int96"},{"name":"distributor","type":"address","internalType":"address"},{"name":"referrer","type":"address","internalType":"address"},{"name":"upgradeAmount","type":"uint256","internalType":"uint256"}],"outputs":[{"name":"","type":"bytes","internalType":"bytes"}],"stateMutability":"pure"}]';
