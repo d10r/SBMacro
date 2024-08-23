@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>DCA Dapp</title>
+    <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.2/dist/ethers.umd.min.js"></script>
+</head>
+<body>
+    <h1>DCA Dapp</h1>
+    <button onclick="connectWallet()">Connect Wallet</button>
+    <label id="networkIdLabel">Network ID: Not connected</label><br>
+    <label id="walletAddressLabel">Wallet Address: Not connected</label><br>
+    <form onsubmit="return false;">
+        <label for="torexAddress">Torex Address:</label><br>
+        <input type="text" id="torexAddress" name="torexAddress" value="0x269F9EF6868F70fB20DDF7CfDf69Fe1DBFD307dE" oninput="handleTorexAddressChange()" onblur="handleTorexAddressChange()"><br>
+        <label for="flowrate">Flowrate (tokens per day):</label><br>
+        <input type="number" id="flowrate" name="flowrate" value="10"><br>
+        <label for="distributor">Distributor (optional):</label><br>
+        <input type="text" id="distributor" name="distributor" value="0x0000000000000000000000000000000000000000"><br>
+        <label for="referrer">Referrer (optional):</label><br>
+        <input type="text" id="referrer" name="referrer" value="0x0000000000000000000000000000000000000000"><br>
+        <label for="upgradeAmount">Upgrade Amount (optional):</label><br>
+        <input type="number" id="upgradeAmount" name="upgradeAmount" value="0"><br>
+        <button type="button" onclick="startDCAing()">Start DCAing</button>
+    </form>
+
+    <div id="approvalForm" style="display: none;">
+        <h2>ERC20 Approval</h2>
+        <p id="tokenBalance"></p>
+        <p id="currentAllowance"></p>
+        <form onsubmit="return false;">
+            <label for="allowanceAmount">Allowance Amount:</label><br>
+            <input type="number" id="allowanceAmount" name="allowanceAmount" value="100"><br>
+            <button type="button" onclick="approveToken()">Approve Token</button>
+        </form>
+    </div>
+
+    <script>
+        // base-mainnet address
+        const SB_MACRO_ADDR = "0x3fc579aEA5db5dd9aDb6de5756229ad704399241";
+        const MACRO_FORWARDER_ADDR = "0xFd017DBC8aCf18B06cff9322fA6cAae2243a5c95";
+        let provider;
+        let signer;
+        let networkId;
+        let walletAddress;
+        let torexContract;
+        let superTokenContract;
+        let underlyingTokenContract;
+
+        async function connectWallet() {
+            if (typeof window.ethereum !== 'undefined') {
+                provider = new ethers.BrowserProvider(window.ethereum);
+                await window.ethereum.request({ method: 'eth_requestAccounts' });
+                signer = await provider.getSigner();
+                walletAddress = await signer.getAddress();
+                networkId = await provider.getNetwork();
+                document.getElementById('networkIdLabel').innerHTML = `Network ID: ${networkId.chainId}`;
+                if (Number(networkId.chainId) !== 8453) {
+                    alert('Currently works with base-mainnet only, but connected to different chain!');
+                }
+                document.getElementById('walletAddressLabel').innerHTML = `Wallet Address: ${walletAddress}`;
+            } else {
+                alert('Please install MetaMask or another Ethereum wallet');
+            }
+        }
+
+        async function handleTorexAddressChange() {
+            if (!provider || !signer) {
+                alert('Please connect your wallet first');
+                return;
+            }
+
+            const torexAddress = document.getElementById('torexAddress').value;
+            const torexAbi = ['function getPairedTokens() view returns (address, address)'];
+            torexContract = new ethers.Contract(torexAddress, torexAbi, signer);
+
+            try {
+                const [superTokenAddress, ] = await torexContract.getPairedTokens();
+                const superTokenAbi = [
+                    'function balanceOf(address account) view returns (uint256)',
+                    'function allowance(address owner, address spender) view returns (uint256)',
+                    'function getUnderlyingToken() view returns (address)',
+                    'function symbol() view returns (string)'
+                ];
+                superTokenContract = new ethers.Contract(superTokenAddress, superTokenAbi, signer);
+
+                const underlyingTokenAddress = await superTokenContract.getUnderlyingToken();
+                console.log('Super Token Address:', superTokenAddress);
+                console.log('Underlying Token Address:', underlyingTokenAddress);
+                if (underlyingTokenAddress !== "0x0000000000000000000000000000000000000000") {
+                    const underlyingTokenAbi = [
+                        'function balanceOf(address account) view returns (uint256)',
+                        'function allowance(address owner, address spender) view returns (uint256)',
+                        'function symbol() view returns (string)',
+                        'function decimals() view returns (uint8)',
+                        'function approve(address spender, uint256 amount) returns (bool)'
+                    ];
+                    underlyingTokenContract = new ethers.Contract(underlyingTokenAddress, underlyingTokenAbi, signer);
+
+                    const superTokenSymbol = await superTokenContract.symbol();
+                    const underlyingTokenSymbol = await underlyingTokenContract.symbol();
+                    const underlyingTokenDecimals = await underlyingTokenContract.decimals();
+
+                    console.log('Super Token Symbol:', superTokenSymbol);
+                    console.log('Underlying Token Symbol:', underlyingTokenSymbol);
+
+                    const underlyingBalance = await underlyingTokenContract.balanceOf(walletAddress);
+                    const underlyingAllowance = await underlyingTokenContract.allowance(walletAddress, superTokenAddress);
+
+                    const formattedBalance = ethers.formatUnits(underlyingBalance, underlyingTokenDecimals);
+                    const formattedAllowance = ethers.formatUnits(underlyingAllowance, underlyingTokenDecimals);
+
+                    document.getElementById('tokenBalance').innerHTML = `Token Balance: ${formattedBalance} ${underlyingTokenSymbol}`;
+                    document.getElementById('currentAllowance').innerHTML = `Current Allowance: ${formattedAllowance} ${underlyingTokenSymbol}`;
+                    document.getElementById('approvalForm').style.display = 'block';
+                } else {
+                    document.getElementById('approvalForm').style.display = 'none';
+                }
+            } catch (error) {
+                console.error('Error instantiating contracts:', error);
+                alert('Error instantiating contracts. Please check the Torex address.');
+            }
+        }
+
+        async function approveToken() {
+            if (!underlyingTokenContract) {
+                alert('Please enter a valid Torex address first');
+                return;
+            }
+
+            const allowanceAmount = document.getElementById('allowanceAmount').value;
+            const superTokenAddress = await superTokenContract.getAddress();
+            const underlyingTokenDecimals = await underlyingTokenContract.decimals();
+            const amount = ethers.parseUnits(allowanceAmount, underlyingTokenDecimals);
+
+            try {
+                const tx = await underlyingTokenContract.approve(superTokenAddress, amount);
+                await tx.wait();
+                alert('Token approval successful!');
+                handleTorexAddressChange(); // Refresh the displayed allowance
+            } catch (error) {
+                console.error('Error approving token:', error);
+                alert('Error approving token. Please try again.');
+            }
+        }
+        async function startDCAing() {
+            console.log("dcaing");
+            if (!provider || !signer) {
+                alert('Please connect your wallet first');
+                return;
+            }
+
+            // Get input values
+            const torexAddress = document.getElementById('torexAddress').value;
+            const flowratePerDay = document.getElementById('flowrate').value;
+            const distributor = document.getElementById('distributor').value || "0x0000000000000000000000000000000000000000";
+            const referrer = document.getElementById('referrer').value || "0x0000000000000000000000000000000000000000";
+            const upgradeAmount = document.getElementById('upgradeAmount').value || "0";
+
+            // Convert flowrate from tokens per day to wei per second
+            const tokensPerSecond = flowratePerDay / (24 * 60 * 60);
+            const weiPerSecond = ethers.parseUnits(tokensPerSecond.toFixed(18), 18);
+            const flowrate = weiPerSecond.toString();
+
+            console.log(`flowrate: ${flowrate}`);
+
+            // Get ABI (you should replace this with your actual ABI)
+            const sbMacroAbi = '[{"type":"function","name":"buildBatchOperations","inputs":[{"name":"host","type":"address","internalType":"contract ISuperfluid"},{"name":"params","type":"bytes","internalType":"bytes"},{"name":"msgSender","type":"address","internalType":"address"}],"outputs":[{"name":"operations","type":"tuple[]","internalType":"struct ISuperfluid.Operation[]","components":[{"name":"operationType","type":"uint32","internalType":"uint32"},{"name":"target","type":"address","internalType":"address"},{"name":"data","type":"bytes","internalType":"bytes"}]}],"stateMutability":"view"},{"type":"function","name":"getParams","inputs":[{"name":"torexAddr","type":"address","internalType":"address"},{"name":"flowRate","type":"int96","internalType":"int96"},{"name":"distributor","type":"address","internalType":"address"},{"name":"referrer","type":"address","internalType":"address"},{"name":"upgradeAmount","type":"uint256","internalType":"uint256"}],"outputs":[{"name":"","type":"bytes","internalType":"bytes"}],"stateMutability":"pure"}]';
+            const macroForwarderAbi = '[{"type":"constructor","inputs":[{"name":"host","type":"address","internalType":"contract ISuperfluid"}],"stateMutability":"nonpayable"},{"type":"function","name":"buildBatchOperations","inputs":[{"name":"m","type":"address","internalType":"contract IUserDefinedMacro"},{"name":"params","type":"bytes","internalType":"bytes"}],"outputs":[{"name":"operations","type":"tuple[]","internalType":"struct ISuperfluid.Operation[]","components":[{"name":"operationType","type":"uint32","internalType":"uint32"},{"name":"target","type":"address","internalType":"address"},{"name":"data","type":"bytes","internalType":"bytes"}]}],"stateMutability":"view"},{"type":"function","name":"runMacro","inputs":[{"name":"m","type":"address","internalType":"contract IUserDefinedMacro"},{"name":"params","type":"bytes","internalType":"bytes"}],"outputs":[{"name":"","type":"bool","internalType":"bool"}],"stateMutability":"nonpayable"}]';
+
+            // Get contract
+            const sbMacro = new ethers.Contract(SB_MACRO_ADDR, sbMacroAbi, signer);
+            const params = await sbMacro.getParams(torexAddress, flowrate, distributor, referrer, upgradeAmount);
+            console.log(`params: ${params}`);
+
+            const macroForwarder = new ethers.Contract(MACRO_FORWARDER_ADDR, macroForwarderAbi, signer);
+            try {
+                const tx = await macroForwarder.runMacro(SB_MACRO_ADDR, params);
+                console.log(`Transaction hash: ${tx.hash}`);
+                await tx.wait();
+                console.log('Transaction confirmed');
+            } catch (error) {
+                console.error('Error running macro:', error);
+                alert('Error running macro. Please check your inputs and try again.');
+            }
+        }
+    </script>
+</body>
+</html>
