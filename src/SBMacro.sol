@@ -3,9 +3,12 @@ pragma solidity ^0.8.26;
 
 import { ISuperfluid, BatchOperation, IConstantFlowAgreementV1, IGeneralDistributionAgreementV1, ISuperToken, ISuperfluidPool, IERC20 }
     from "@superfluid-finance/ethereum-contracts/contracts/interfaces/superfluid/ISuperfluid.sol";
+import { SuperTokenV1Library } from "@superfluid-finance/ethereum-contracts/contracts/apps/SuperTokenV1Library.sol";
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { IUserDefinedMacro } from "@superfluid-finance/ethereum-contracts/contracts/utils/MacroForwarder.sol";
 import { ITorex } from "./interfaces/ITorex.sol";
+
+using SuperTokenV1Library for ISuperToken;
 
 /**
  * User defined macro for SuperBoring.
@@ -15,15 +18,18 @@ import { ITorex } from "./interfaces/ITorex.sol";
  */
 contract SBMacro is IUserDefinedMacro {
 
+    error NoOutTokenPoolUnits();
+
     /**
      * @dev Convenience function to get abi encoded parameters to be used with `runMacro()`.
      * @param torexAddr address of the Torex contract. The token address is derived from this (inToken).
      * @param flowRate flowrate to be set for the flow to the Torex contract. The pre-existing flowrate must be 0 (no flow).
      * @param distributor address of the distributor, or zero address if none.
      * @param referrer address of the referrer, or zero address if none.
-     * @param upgradeAmount amount (18 decimals) to upgrade from underlying to SuperToken.
+     * @param upgradeAmount amount (18 decimals) to upgrade from underlying ERC20 to SuperToken.
      *   - if `type(uint256).max`, the maximum possible amount is upgraded (current allowance).
      *   - otherwise, the specified amount is upgraded. Requires sufficient underlying balance and allowance, otherwise the transaction will revert.
+     * Note that upgradeAmount shall be 0 if inToken has no underlying ERC20 token.
      */
     function getParams(address torexAddr, int96 flowRate, address distributor, address referrer, uint256 upgradeAmount)
         public pure returns (bytes memory)
@@ -45,9 +51,10 @@ contract SBMacro is IUserDefinedMacro {
         (ISuperToken inToken,) = torex.getPairedTokens();
 
         // build batch operations
-        operations = new ISuperfluid.Operation[](4);
+        operations = new ISuperfluid.Operation[](upgradeAmount > 0 ? 4 : 3);
+        uint8 opsCnt = 0;
 
-        // op[0]: upgrade
+        // op: upgrade
         if (upgradeAmount == type(uint256).max) {
             IERC20 underlyingToken = IERC20(inToken.getUnderlyingToken());
             uint256 underlyingUpgradeAmount = Math.min(
@@ -56,14 +63,16 @@ contract SBMacro is IUserDefinedMacro {
             );
             (upgradeAmount,) = _fromUnderlyingAmount(inToken, underlyingUpgradeAmount);
         }
-        operations[0] = ISuperfluid.Operation({
-            operationType : BatchOperation.OPERATION_TYPE_SUPERTOKEN_UPGRADE,
-            target: address(inToken),
-            data: abi.encode(upgradeAmount)
-        });
+        if (upgradeAmount > 0) {
+            operations[opsCnt++] = ISuperfluid.Operation({
+                operationType : BatchOperation.OPERATION_TYPE_SUPERTOKEN_UPGRADE,
+                target: address(inToken),
+                data: abi.encode(upgradeAmount)
+            });
+        }
 
-        // op[1]: approve Torex to use SuperToken
-        operations[1] = ISuperfluid.Operation({
+        // op: approve Torex to use SuperToken
+        operations[opsCnt++] = ISuperfluid.Operation({
             operationType : BatchOperation.OPERATION_TYPE_ERC20_APPROVE,
             target: address(inToken),
             data: abi.encode(
@@ -72,17 +81,18 @@ contract SBMacro is IUserDefinedMacro {
             )
         });
 
-        // op[2]: create flow
+        // op: create or update flow
         {
+            int96 prevFlowRate = inToken.getFlowRate(msgSender, address(torex));
             IConstantFlowAgreementV1 cfa = IConstantFlowAgreementV1(address(host.getAgreementClass(
                 keccak256("org.superfluid-finance.agreements.ConstantFlowAgreement.v1")
             )));
-            operations[2] = ISuperfluid.Operation({
+            operations[opsCnt++] = ISuperfluid.Operation({
                 operationType : BatchOperation.OPERATION_TYPE_SUPERFLUID_CALL_AGREEMENT,
                 target: address(cfa),
                 data: abi.encode(
                     abi.encodeCall(
-                        cfa.createFlow,
+                        prevFlowRate == 0 ? cfa.createFlow : cfa.updateFlow,
                         (
                             inToken,
                             address(torex), // receiver
@@ -95,13 +105,13 @@ contract SBMacro is IUserDefinedMacro {
             });
         }
 
-        // op[3]: connect outTokenDistributionPool
+        // op: connect outTokenDistributionPool
         {
             IGeneralDistributionAgreementV1 gda = IGeneralDistributionAgreementV1(address(host.getAgreementClass(
                 keccak256("org.superfluid-finance.agreements.GeneralDistributionAgreement.v1")
             )));
             ISuperfluidPool outTokenDistributionPool = torex.outTokenDistributionPool();
-            operations[3] = ISuperfluid.Operation({
+            operations[opsCnt++] = ISuperfluid.Operation({
                 operationType : BatchOperation.OPERATION_TYPE_SUPERFLUID_CALL_AGREEMENT,
                 target: address(gda),
                 data: abi.encode(
@@ -138,6 +148,19 @@ contract SBMacro is IUserDefinedMacro {
             adjustedAmount = superTokenAmount * factor;
         } else {
             superTokenAmount = adjustedAmount = amount;
+        }
+    }
+
+    /// reverts if the user does not have any outTokenDistributionPool units after the call
+    function postCheck(ISuperfluid /*host*/, bytes memory params, address msgSender) external view {
+        // parse params
+        (address torexAddr,,,,) =
+            abi.decode(params, (address, int96, address, address, uint256));
+
+        ITorex torex = ITorex(torexAddr);
+        ISuperfluidPool outTokenDistributionPool = torex.outTokenDistributionPool();
+        if (outTokenDistributionPool.getUnits(msgSender) == 0) {
+            revert NoOutTokenPoolUnits();
         }
     }
 }

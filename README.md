@@ -1,21 +1,20 @@
 ## SB Macro
 
-This is a Macro contract which provides a convenient API for SuperBoring.
+This is a Macro contract which provides a convenient API for easy onboarding to SuperBoring.
+Running this macro will create a DCA flow to a SuperBoring Torex according to the provided parameters.
+The following parameters can be set:
+- Torex address (determines the Super Token to be sent)
+- Flowrate of the flow being created to the Torex
+- Distributor (optional, can be zero)
+- Referrer (optional, can be zero)
+- Upgrade amount (optional, can be 0)
 
-### Why Macro?
-
-What's the point of a Macro?
-1. A Dapp could just have a normal contract which is invoked.
-But then msg.sender wouldn't be preserved. And it can't do a sender preserving forward call bcs not a trusted forwarder
-2. A Dapp could just compile the needed calldata and do a batchOperation itself, without intermediate contract.
-Yes, but that can be much more effort, also it's not atomic. So state it reads & assumes could have change when executed.
-
-The macro allows preserving sender while having a convenient API and atomicity.
+For more details about the arguments, see the contract documentation.
 
 ### Usage
 
 The macro contract is invoked by a pre-existing [MacroForwarder](https://github.com/superfluid-finance/protocol-monorepo/blob/dev/packages/ethereum-contracts/contracts/utils/MacroForwarder.sol) contract. This contract is registered as a `trusted forwarder` of the Superfluid protocol.
-It's currently available at address `0xFd017DBC8aCf18B06cff9322fA6cAae2243a5c95` on Optimisim Sepolia Testnet and Base Mainnet.
+Check [the console](https://console.superfluid.finance/protocol) for MacroForwarder deployment addresses.
 
 First, an instance of `SBMacro` needs to be deployed. This can be done with
 ```
@@ -40,6 +39,17 @@ macroFwd.runMacro(sbMacroAddr, await sbMacro.getParams(torexAddr, flowRate, dist
 ```
 
 For more details about the arguments, see the contract documentation.
+
+### Why a Macro?
+
+What's the point of a Macro?
+1. A Dapp could just have a normal contract which is invoked.
+But then msg.sender wouldn't be preserved. And it can't do a sender preserving forward call bcs not a trusted forwarder
+2. A Dapp could just compile the needed calldata and do a batchOperation itself, without intermediate contract.
+Yes, but that can be much more effort, also it's not atomic. So state it reads & assumes could have change when executed.
+
+The macro allows preserving sender while having a convenient API and atomicity.
+
 
 ### Limitations
 
