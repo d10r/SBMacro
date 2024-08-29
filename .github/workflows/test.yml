@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  FOUNDRY_PROFILE: ci
+
+jobs:
+  check:
+    strategy:
+      fail-fast: true
+
+    name: Test SBMacro
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+
+      - name: Show Forge version
+        run: |
+          forge --version
+
+      - name: Install dependencies
+        run: |
+          forge install
+
+      - name: Run test
+        run: |
+          ./run_test.sh base-mainnet SBMacroTest -vvv
+        env:
+          # USDCx -> ETHx
+          TOREX1_ADDR: "0x269F9EF6868F70fB20DDF7CfDf69Fe1DBFD307dE"
+          # ETHx -> USDCx
+          TOREX2_ADDR: "0x267264CFB67B015ea23c97C07d609FbFc06aDC17"
